@@ -6,7 +6,7 @@
  * Date: 2019/12/3
  * Time: 2:57 PM
  */
-
+$start_time = microtime(true);
 $sku_id = 1;
 
 $redis = get_redis();
@@ -18,8 +18,7 @@ if ($stock > 0) {
     $res = $redis->set($lock_key, 1, ['nx', 'px' => 2000]);
 
     if (!$res) {
-        echo "系统繁忙，请稍后再试! \n";
-        exit();
+        done($start_time,-1);
     }
 
     usleep(rand(100, 1000));
@@ -50,24 +49,19 @@ if ($stock > 0) {
             $mysql->autocommit(true);
         } else {
             $mysql->rollback();
-            exit('redis库存删减失败，回滚');
+            done($start_time,-2);
         }
     } else {
         $mysql->rollback();
-        exit('mysql事务执行失败，回滚');
+        done($start_time,-3);
     }
 
-
-    echo "扣减成功, 当前剩余库存 {$stock} \n";
-    error_log("扣减成功, 当前剩余库存 {$stock}");
     $redis->del($lock_key);
-    exit();
 
+    done($start_time,1, $stock);
 }
 
-echo "库存不足! \n";
-error_log("库存不足!");
-exit();
+done($start_time);
 
 
 function get_redis() {
@@ -101,4 +95,27 @@ function get_mysql() {
 function randon_code($len = 16) {
     $ori = sha1(uniqid() . microtime(true));
     return substr(str_shuffle($ori), 0, $len);
+}
+
+function done($start_time, $status = 0, $stock = 0) {
+    $msg = '';
+    switch ($status) {
+        case 1:
+            $msg = "扣减成功, 当前剩余库存: " . $stock;
+            break;
+        case -1:
+            $msg = "系统繁忙, 请稍后再试";
+            break;
+        case -2:
+            $msg = "redis库存删减失败，回滚";
+            break;
+        case -3:
+            $msg = "mysql事务执行失败，回滚";
+            break;
+        default:
+            $msg = "库存不足";
+    }
+    error_log($msg);
+    error_log("运行时间: " . (microtime(true) - $start_time) * 1000);
+    exit();
 }

@@ -15,7 +15,7 @@ $stock_key = 'SKU_STOCK_' . $sku_id;
 
 $stock = $redis->get($stock_key);
 if ($stock > 0) {
-    $res = $redis->set($lock_key, 1, ['nx', 'px' => 300]);
+    $res = $redis->set($lock_key, 1, ['nx', 'px' => 2000]);
 
     if (!$res) {
         echo "系统繁忙，请稍后再试! \n";

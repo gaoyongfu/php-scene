@@ -1,11 +1,18 @@
 <?php
 /**
- * redis + rabbitmq 实现分布式锁
+ * redis + rabbitmq 实现分布式锁, 防止超卖
+ *
  * Created by PhpStorm.
- * User: austin
+ * User: 渊虹
  * Date: 2019/12/3
  * Time: 2:57 PM
  */
+
+require_once '../vendor/autoload.php';
+
+use PhpAmqpLib\Connection\AMQPStreamConnection;
+use PhpAmqpLib\Message\AMQPMessage;
+
 $start_time = microtime(true);
 $sku_id = 1;
 
@@ -15,20 +22,25 @@ $stock_key = 'SKU_STOCK_' . $sku_id;
 
 $stock = $redis->get($stock_key);
 if ($stock > 0) {
-    $res = $redis->set($lock_key, 1, ['nx', 'px' => 2000]);
-
+    $res = $redis->set($lock_key, 1, ['nx', 'px' => 200]);
     if (!$res) {
         done($start_time,-1);
     }
 
-    usleep(rand(100, 1000));
+    // 延时器
+    pttl_monitor($lock_key,200);
+
+    usleep(rand(500, 1000) * 1000);
 
     $order_code = randon_code(32);
     $mysql = get_mysql();
     $mysql->autocommit(false);
 
-    $insert_order = sprintf("insert into `order` (order_code, sku_id) values ('%s', %d)",$order_code, $sku_id);
-    $update_sku = sprintf('update sku set stock = stock - 1 where id = %d and status = %d and stock = %d',$sku_id, 1, $stock);
+    $insert_order_tpl = 'insert into `order` (order_code, sku_id) values ("%s", %d)';
+    $insert_order = sprintf($insert_order_tpl,$order_code, $sku_id);
+
+    $update_sku_tpl = 'update sku set stock = stock - 1 where id = %d and status = %d and stock = %d';
+    $update_sku = sprintf($update_sku_tpl,$sku_id, 1, $stock);
 
     $mysql->begin_transaction();
 
@@ -92,13 +104,37 @@ function get_mysql() {
     return $mysql;
 }
 
+function pttl_monitor($key, $pttl) {
+    echo $key;
+    $mq = get_rabbitmq();
+
+    $ch = $mq->channel();
+    $ch->queue_declare('ttl_monitor', false, false, false, false);
+    $msg_json = json_encode(array('redis_key' => $key, 'pttl' => $pttl));
+    $msg = new AMQPMessage($msg_json);
+    $ch->basic_publish($msg, '', 'ttl_monitor');
+
+    $ch->close();
+    $mq->close();
+
+}
+
+function get_rabbitmq() {
+    $host = '127.0.0.1';
+    $port = 5672;
+    $username = 'admin';
+    $password = 'admin';
+    $vhost    = 'my_vhost';
+
+    return new AMQPStreamConnection($host, $port, $username, $password, $vhost);
+}
+
 function randon_code($len = 16) {
     $ori = sha1(uniqid() . microtime(true));
     return substr(str_shuffle($ori), 0, $len);
 }
 
 function done($start_time, $status = 0, $stock = 0) {
-    $msg = '';
     switch ($status) {
         case 1:
             $msg = "扣减成功, 当前剩余库存: " . $stock;
@@ -116,6 +152,7 @@ function done($start_time, $status = 0, $stock = 0) {
             $msg = "库存不足";
     }
     error_log($msg);
-    error_log("运行时间: " . (microtime(true) - $start_time) * 1000);
+    error_log("运行时间: " . (microtime(true) - $start_time) * 1000 . '毫秒');
+    echo $msg;
     exit();
 }

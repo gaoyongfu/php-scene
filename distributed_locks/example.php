@@ -30,7 +30,7 @@ if ($stock > 0) {
     // 延时器
     pttl_monitor($lock_key,200);
 
-    usleep(rand(500, 1000) * 1000);
+    usleep(rand(100, 500) * 1000);
 
     $order_code = randon_code(32);
     $mysql = get_mysql();

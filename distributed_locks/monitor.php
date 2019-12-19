@@ -25,7 +25,7 @@ $ch->basic_consume('ttl_monitor', '', false, true, false, false, function ($msg)
         if ($current_pttl < 0) {
             break;
         }
-        echo "current_pttl = " . $current_pttl . PHP_EOL;
+
         if (($ori_pttl - $current_pttl) >= $ori_pttl / 3) {
             $pttl = $ori_pttl + $current_pttl;
             echo "key = $redis_key 延长过期时间, 当前剩余过期时间 = $current_pttl 毫秒, 延长后的剩余过期时间 = $pttl 毫秒" . PHP_EOL;
